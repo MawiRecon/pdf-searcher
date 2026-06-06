@@ -10,8 +10,12 @@ A single-file, browser-based search tool for working through stacks of PDF refer
 
 1. **Download the tool.** Click `index.html` above → click the **Download raw file** button (down-arrow icon, top-right of the file view). Save it anywhere — Desktop, a course folder, wherever.
 2. **Open `index.html`** by double-clicking it. It will open in your default browser. Chrome or Edge required.
-3. **Click "Pick folder…"** and choose the folder that holds your course PDFs. The tool walks every subfolder, so a structure like `Phase 1 Ref / Lesson 2 / *.pdf` is fine.
-4. **Wait for indexing.** First time can take ~30 seconds depending on how many PDFs you have. Subsequent loads remember the folder.
+3. **Load your PDFs.** Two options:
+   - **Click "Pick folder…"** and choose the folder that holds your course PDFs.
+   - **Or drag-and-drop** the folder (or a bunch of PDF files) anywhere onto the page. Use this on government/managed computers where the folder picker is blocked.
+
+   Subfolders like `Phase 1 Ref / Lesson 2 / *.pdf` are preserved either way.
+4. **Wait for indexing.** First time can take ~30 seconds depending on how many PDFs you have. With folder-picker mode, subsequent loads remember the folder.
 5. **Search.** Type a few keywords. Click a result to preview the PDF inline with the matched terms highlighted.
 
 > If you'd rather not download, you can also run it directly in your browser at the GitHub Pages URL listed in the repo's **About** section.
@@ -44,10 +48,16 @@ All bookmarks, history, and settings are stored in your browser's local storage 
 
 ## For classmates
 
-If you're getting this from someone in the course:
+If you're getting this from someone in the course, you have two options:
+
+### Easiest: just visit the live URL
+
+Open the GitHub Pages URL in Chrome or Edge. Drag a folder of PDFs onto the page (or click **Pick folder…**) and you're set. Nothing is uploaded — files are read directly from your computer.
+
+### Download for offline use
 
 1. Download `index.html` from this repo (click the file, then the download icon).
-2. Save it next to a folder structure of your own PDFs — for example:
+2. Save it anywhere. Optionally place it next to your PDFs:
    ```
    PDF-Searcher/
      index.html
@@ -57,7 +67,12 @@ If you're getting this from someone in the course:
      Phase 2 Ref/
        ...
    ```
-3. Double-click `index.html`, point it at the parent folder, and you're set.
+3. Double-click `index.html` to open it in your browser.
+4. Drag your PDF folder onto the page, **or** click **Pick folder…**.
+
+### On government / managed computers
+
+The "Pick folder…" button often does nothing on locked-down computers — the OS folder picker is blocked by policy. **Drag-and-drop works around this:** just drag the folder (or individual PDF files) from File Explorer onto the page. Same result.
 
 The tool itself contains no course material — you supply your own PDFs from wherever you normally access them (SharePoint, OneDrive, local downloads, etc.).
 

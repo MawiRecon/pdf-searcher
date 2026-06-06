@@ -452,9 +452,46 @@
     border-radius: 2px; overflow: hidden; margin: 6px 0;
   }
   .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(74, 158, 255, 0.15);
+    border: 4px dashed var(--accent);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+  }
+  .drop-overlay.active { display: flex; }
+  .drop-overlay .drop-msg {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    padding: 24px 40px;
+    border-radius: 10px;
+    font-size: 18px;
+    font-weight: 500;
+    text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+  }
+  .drop-overlay .drop-msg .small {
+    display: block;
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-msg">
+    Drop folder or PDFs to load
+    <span class="small">Everything stays on your computer — nothing is uploaded.</span>
+  </div>
+</div>
 <header>
   <h1>PDF Searcher</h1>
   <button id="pickFolder">Pick folder…</button>
@@ -500,6 +537,8 @@
       <div class="empty">
         <h2>No folder loaded</h2>
         <p>Click <strong>Pick folder…</strong> and choose a directory that contains your PDFs.</p>
+        <p style="color:var(--accent);font-weight:500;margin-top:10px">— or just drag a folder (or PDF files) anywhere on this window.</p>
+        <p style="font-size:12px;color:var(--muted)">If <strong>Pick folder…</strong> doesn't do anything (some restricted computers block the picker), use drag-and-drop instead.</p>
         <p>Subfolders (e.g. <code>Phase 1 / Lesson 2</code>) become the folder tree on the left.</p>
         <p style="margin-top:14px; font-size:12px">Requires Chrome or Edge. Everything runs locally — no upload.</p>
       </div>
@@ -596,19 +635,32 @@
     });
   }
 
+  let droppedPdfs = null;   // cached array of {name, path, folder, file} from drag-drop
+  let indexSource = null;   // 'folder' or 'drop'
+
   $('pickFolder').addEventListener('click', async () => {
     if (!window.showDirectoryPicker) {
-      alert('This tool needs the File System Access API. Use Chrome or Edge.');
+      alert('Your browser doesn\'t support the folder picker. Use drag-and-drop instead — just drag a folder of PDFs onto this window.');
       return;
     }
     try {
       rootHandle = await window.showDirectoryPicker({ mode: 'read' });
-    } catch (e) { return; }
+    } catch (e) {
+      // User cancel = no-op. Real errors (policy blocked, etc.) we surface a hint.
+      if (e && e.name && e.name !== 'AbortError') {
+        console.warn('pick folder error', e);
+        alert('Folder picker failed (often blocked on managed/government computers).\n\nDrag a folder of PDFs onto this window instead.');
+      }
+      return;
+    }
     try { await idbSet('rootHandle', rootHandle); } catch (e) { console.warn('persist failed', e); }
     await indexAll();
   });
 
-  $('reindex').addEventListener('click', () => { if (rootHandle) indexAll(); });
+  $('reindex').addEventListener('click', () => {
+    if (indexSource === 'folder' && rootHandle) indexAll();
+    else if (indexSource === 'drop' && droppedPdfs) indexFiles(droppedPdfs);
+  });
 
   // Attempt to restore last folder on startup
   (async function tryRestoreFolder() {
@@ -645,25 +697,38 @@
   })();
 
   async function indexAll() {
+    if (!rootHandle) return;
+    indexSource = 'folder';
+    const pdfs = [];
+    for await (const entry of walk(rootHandle, '')) pdfs.push(entry);
+    await indexFiles(pdfs);
+  }
+
+  // Shared indexer that takes a list of {name, path, folder, handle?, file?}
+  async function indexFiles(pdfs) {
     $('reindex').style.display = '';
     resultsEl.innerHTML = '<div class="empty"><h2>Indexing…</h2><div class="progress"><div id="pbar" style="width:0%"></div></div><p id="ptxt"></p></div>';
     index = [];
 
-    const pdfs = [];
-    for await (const entry of walk(rootHandle, '')) pdfs.push(entry);
+    if (!pdfs.length) {
+      resultsEl.innerHTML = '<div class="empty"><h2>No PDFs found</h2><p>The folder or files you provided didn\'t contain any PDFs.</p></div>';
+      return;
+    }
 
     const pbar = $('pbar'), ptxt = $('ptxt');
     let done = 0;
     for (const entry of pdfs) {
       ptxt && (ptxt.textContent = `${done+1} / ${pdfs.length} — ${entry.path}`);
       try {
-        const file = await entry.handle.getFile();
+        const file = entry.file || (entry.handle ? await entry.handle.getFile() : null);
+        if (!file) throw new Error('No file source');
         const pages = await extractText(file);
         index.push({
           path: entry.path,
           folder: entry.folder,
           name: entry.name,
           handle: entry.handle,
+          file: entry.file,
           pages
         });
       } catch (e) {
@@ -673,11 +738,101 @@
       if (pbar) pbar.style.width = (done / pdfs.length * 100) + '%';
     }
 
-    setStatus(`${index.length} PDFs indexed`);
+    setStatus(`${index.length} PDFs indexed${indexSource === 'drop' ? ' (drag-drop)' : ''}`);
     buildTree();
     renderTree();
     resultsEl.innerHTML = '<div class="empty"><h2>Ready</h2><p>Type a search query above.</p><p style="font-size:12px;color:var(--muted)">Tip: multiple words must <em>all</em> appear on the same page. Use "quotes" for exact phrase, or check Phrase mode.</p></div>';
   }
+
+  // ----- drag and drop -----
+  function readDirEntries(dirEntry) {
+    return new Promise((resolve, reject) => {
+      const reader = dirEntry.createReader();
+      const all = [];
+      function readBatch() {
+        reader.readEntries((entries) => {
+          if (!entries.length) return resolve(all);
+          all.push(...entries);
+          readBatch();
+        }, reject);
+      }
+      readBatch();
+    });
+  }
+
+  async function collectPdfsFromEntries(entries, basePath) {
+    const out = [];
+    for (const entry of entries) {
+      if (!entry) continue;
+      const p = basePath ? `${basePath}/${entry.name}` : entry.name;
+      if (entry.isDirectory) {
+        const children = await readDirEntries(entry);
+        const childPdfs = await collectPdfsFromEntries(children, p);
+        out.push(...childPdfs);
+      } else if (entry.isFile && /\.pdf$/i.test(entry.name)) {
+        try {
+          const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+          out.push({
+            name: entry.name,
+            path: p,
+            folder: basePath || '',
+            file
+          });
+        } catch (e) {
+          console.warn('Failed to read dropped file', p, e);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Drag overlay + drop handling on the whole window
+  let dragCounter = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    $('dropOverlay').classList.add('active');
+  });
+  window.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+  });
+  window.addEventListener('dragleave', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) $('dropOverlay').classList.remove('active');
+  });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    $('dropOverlay').classList.remove('active');
+
+    if (!e.dataTransfer || !e.dataTransfer.items) return;
+    const entries = [];
+    for (const item of e.dataTransfer.items) {
+      if (item.kind !== 'file') continue;
+      const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+      if (entry) entries.push(entry);
+    }
+    if (!entries.length) {
+      alert('Could not read the dropped item. Try dragging a folder or PDF files directly from File Explorer.');
+      return;
+    }
+
+    setStatus('Reading dropped files…');
+    const pdfs = await collectPdfsFromEntries(entries, '');
+    if (!pdfs.length) {
+      alert('No PDF files were found in what you dropped.');
+      setStatus('');
+      return;
+    }
+    droppedPdfs = pdfs;
+    indexSource = 'drop';
+    rootHandle = null;          // ensure folder-restore button is hidden
+    await indexFiles(pdfs);
+  });
 
   async function* walk(dir, path) {
     for await (const entry of dir.values()) {
@@ -1039,7 +1194,8 @@
         // Tear down previous doc
         if (currentPdf) { try { currentPdf.destroy(); } catch (e) {} currentPdf = null; }
         if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (e) {} currentBlobUrl = null; }
-        const file = await doc.handle.getFile();
+        const file = doc.file || (doc.handle ? await doc.handle.getFile() : null);
+        if (!file) throw new Error('No file source for ' + doc.name);
         currentBlobUrl = URL.createObjectURL(file);
         const buf = await file.arrayBuffer();
         currentPdf = await pdfjsLib.getDocument({ data: buf, isEvalSupported: false }).promise;
