@@ -1,0 +1,24 @@
+# Course material — never commit any PDFs or reference folders
+*.pdf
+Phase*/
+*Ref/
+*Reference*/
+
+# Claude / editor metadata
+.claude/
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup / temp
+*.bak
+*.tmp
+*~
+
+# Local user data exports (if you ever export bookmarks)
+*.local.json
+bookmarks-backup.json
